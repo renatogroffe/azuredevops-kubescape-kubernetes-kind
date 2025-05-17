@@ -1,0 +1,89 @@
+trigger:
+- main
+
+resources:
+- repo: self
+
+variables:
+  vmImageName: 'ubuntu-latest'
+  Path_YAMLIntegrationTests: './src'
+
+stages:
+- stage: SecurityAnalysis
+  displayName: Security Analysis stage
+  jobs:
+  - job: SecurityAnalysis
+    displayName: Security Analysis
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - script: |
+        kind
+        cd $(Path_YAMLIntegrationTests)
+        kind create cluster --name kind-01 --config=kind-cluster-config-automation-env.yaml
+      displayName: Criar cluster Kubernetes local com kind
+    - script: |
+        echo ' '
+        echo 'Cluster Kubernetes local em funcionamento...'
+        echo ' '
+        kubectl get services
+      displayName: Verificar cluster Kubernetes local criado com kind
+    - script: docker container ls
+      displayName: Exibir containers em execução
+    - script: |
+        kubectl create namespace integrationtests
+      displayName: Criar namespace integrationtests
+    - script: |
+        kubectl get namespaces
+      displayName: Exibir namespaces criados
+    - script: |
+        cd $(Path_YAMLIntegrationTests)
+        kubectl apply -f deployment-automation-env.yml -n integrationtests
+      displayName: Criar deployment no ambiente de testes
+    - script: |
+        kubectl get all -n integrationtests
+        echo ' '
+        echo 'Aguardando a inicialização dos serviços no cluster...'
+        echo ' '
+        sleep 45s
+        kubectl get all -n integrationtests
+      displayName: Verificar subida do deployment do ambiente de testes no namespace integrationtests
+    - script: |
+        echo ''
+        echo '***** Primeira requisicao *****'
+        echo ''
+        curl -s http://localhost:5000/api/contador -H "Accept: application/json" | jq
+      displayName: Testes do deployment no cluster (API REST) - 1a requisicao
+    - script: |
+        echo ''
+        echo '***** Segunda requisicao *****'
+        echo ''
+        curl -s http://localhost:5000/api/contador -H "Accept: application/json" | jq
+      displayName: Testes do deployment no cluster (API REST) - 2a requisicao
+    - script: |
+        kubectl config get-contexts
+      displayName: Exibir contexts/clusters disponiveis para acesso
+    - script: |
+        sudo add-apt-repository ppa:kubescape/kubescape
+        sudo apt update
+        sudo apt install kubescape
+      displayName: Instalar o Kubescape
+    - script: |
+        kubescape version
+        echo
+        kubescape help
+        echo
+        kubescape scan --help
+      displayName: Testar a instalacao do Kubescape
+    - script: |
+        kubescape scan --format html --output report-cluster.html --severity-threshold high
+      displayName: Executar o scanning no cluster de testes com Kubescape
+    - script: |
+        ls -l
+      displayName: Exibir arquivos na raiz (incluindo report-cluster.html)
+      condition: always()
+    - task: PublishHtmlReport@1
+      inputs:
+        reportDir: './report-cluster.html'
+      displayName: Publicar resultado da analise no formato HTML
+      condition: always()
